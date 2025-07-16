@@ -3,154 +3,122 @@ import sqlite3
 from datetime import datetime
 from fpdf import FPDF
 
-# --- Connect SQLite ---
-conn = sqlite3.connect("payments.db", check_same_thread=False)
+# Initialize DB
+conn = sqlite3.connect('payments.db', check_same_thread=False)
 c = conn.cursor()
 
-# --- Create Tables ---
+# Create tables if not exist
 c.execute('''
-    CREATE TABLE IF NOT EXISTS clients (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        project_name TEXT,
-        client_name TEXT,
-        total_amount REAL,
-        created_date TEXT
+    CREATE TABLE IF NOT EXISTS projects (
+        id INTEGER PRIMARY KEY,
+        name TEXT,
+        client TEXT,
+        quotation REAL,
+        created_at TEXT
     )
 ''')
 
 c.execute('''
     CREATE TABLE IF NOT EXISTS payments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        client_id INTEGER,
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER,
         amount REAL,
-        date TEXT,
-        FOREIGN KEY(client_id) REFERENCES clients(id)
+        paid_at TEXT
     )
 ''')
+
 conn.commit()
 
-# --- Title ---
-st.title("💰 Smart Payment Tracker")
+# Title
+st.title("📑 Smart Payment Tracker")
 
-# --- Add New Project ---
-st.header("➕ Add New Project")
-col1, col2, col3 = st.columns(3)
-with col1:
-    project_name = st.text_input("Project Name")
-with col2:
-    client_name = st.text_input("Client Name")
-with col3:
-    total_amount = st.number_input("Total Quotation Amount", min_value=0.0)
-
-if st.button("Add Project"):
-    if project_name and client_name and total_amount > 0:
-        created_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        c.execute("INSERT INTO clients (project_name, client_name, total_amount, created_date) VALUES (?, ?, ?, ?)",
-                  (project_name, client_name, total_amount, created_date))
+# Add new project
+with st.form("new_project"):
+    name = st.text_input("Project Name")
+    client = st.text_input("Client Name")
+    quotation = st.number_input("Quotation Amount", min_value=0.0)
+    submitted = st.form_submit_button("Add Project")
+    if submitted:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        c.execute("INSERT INTO projects (name, client, quotation, created_at) VALUES (?, ?, ?, ?)",
+                  (name, client, quotation, now))
         conn.commit()
-        st.success(f"Added project '{project_name}' for client '{client_name}'.")
-    else:
-        st.warning("Please fill in all fields with valid values.")
+        st.success(f"✅ Project '{name}' added!")
 
-# --- Show All Projects ---
-st.header("📋 All Projects")
+# Show all projects
+c.execute("SELECT * FROM projects")
+projects = c.fetchall()
 
-clients = c.execute("SELECT id, project_name, client_name, total_amount, created_date FROM clients").fetchall()
+for project in projects:
+    proj_id, name, client, quotation, created_at = project
 
-if clients:
-    for client in clients:
-        client_id = client[0]
-        project_name = client[1]
-        client_name = client[2]
-        total_amount = client[3]
-        created_date = client[4]
+    # Payments summary
+    c.execute("SELECT SUM(amount) FROM payments WHERE project_id = ?", (proj_id,))
+    total_paid = c.fetchone()[0] or 0
+    due = quotation - total_paid
 
-        payments = c.execute("SELECT amount, date FROM payments WHERE client_id = ?", (client_id,)).fetchall()
-        total_paid = sum(p[0] for p in payments)
-        remaining = total_amount - total_paid
+    with st.expander(f"📌 {name} — {client}"):
+        st.write(f"**Created Date:** {created_at}")
+        st.write(f"**Quotation:** Rs.{quotation:,.2f}")
+        st.write(f"**Paid:** Rs.{total_paid:,.2f}")
+        st.write(f"**Remaining Due:** Rs.{due:,.2f}")
 
-        with st.expander(f"📌 {project_name} — {client_name}"):
-            st.write(f"**Created Date:** {created_date}")
-            st.write(f"**Total Quotation:** ₹{total_amount:.2f}")
-            st.write(f"**Total Paid:** ₹{total_paid:.2f}")
-            st.write(f"**Remaining Due:** ₹{remaining:.2f}")
+        # Payment history
+        c.execute("SELECT * FROM payments WHERE project_id = ?", (proj_id,))
+        payments = c.fetchall()
+        if payments:
+            st.markdown("**Payments:**")
+            for p in payments:
+                st.write(f"Rs.{p[2]:,.2f} on {p[3]}")
+        else:
+            st.info("No payments yet.")
 
+        # Add new payment
+        payment_amount = st.number_input(f"Add Payment for {name}", min_value=0.0, key=f"{proj_id}_pay")
+        if st.button(f"Add Payment for {name}", key=f"{proj_id}_pay_btn"):
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            c.execute("INSERT INTO payments (project_id, amount, paid_at) VALUES (?, ?, ?)",
+                      (proj_id, payment_amount, now))
+            conn.commit()
+            st.success(f"✅ Payment Rs.{payment_amount:,.2f} added for {name}!")
+
+        # ✅ PDF generation with Rs.
+        def generate_pdf():
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+            pdf.cell(200, 10, txt=f"Project: {name}", ln=True)
+            pdf.cell(200, 10, txt=f"Client: {client}", ln=True)
+            pdf.cell(200, 10, txt=f"Quotation: Rs.{quotation:,.2f}", ln=True)
+            pdf.cell(200, 10, txt=f"Total Paid: Rs.{total_paid:,.2f}", ln=True)
+            pdf.cell(200, 10, txt=f"Remaining Due: Rs.{due:,.2f}", ln=True)
+            pdf.cell(200, 10, txt=f"Created: {created_at}", ln=True)
+
+            pdf.cell(200, 10, txt="Payments:", ln=True)
             if payments:
-                st.write("**Payment History:**")
-                st.table([{"Date": p[1], "Amount": f"₹{p[0]:.2f}"} for p in payments])
-            else:
-                st.info("No payments yet.")
-
-            # --- Add Payment ---
-            new_payment = st.number_input(f"Add Payment for {project_name}", min_value=0.0, key=f"payment_{client_id}")
-            if st.button(f"Add Payment for {project_name}"):
-                if new_payment > 0:
-                    payment_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    c.execute("INSERT INTO payments (client_id, amount, date) VALUES (?, ?, ?)",
-                              (client_id, new_payment, payment_date))
-                    conn.commit()
-                    st.success(f"Added payment of ₹{new_payment:.2f} for {project_name}.")
-                else:
-                    st.warning("Enter a valid payment amount.")
-
-            # --- Generate PDF ---
-            def generate_pdf():
-                pdf = FPDF()
-                pdf.add_page()
-                pdf.set_font("Arial", 'B', 16)
-                pdf.cell(200, 10, "Quotation / Receipt", ln=True, align="C")
-
-                pdf.set_font("Arial", '', 12)
-                pdf.cell(200, 10, f"Project: {project_name}", ln=True)
-                pdf.cell(200, 10, f"Client: {client_name}", ln=True)
-                pdf.cell(200, 10, f"Created: {created_date}", ln=True)
-                pdf.cell(200, 10, f"Total Quotation: ₹{total_amount:.2f}", ln=True)
-                pdf.cell(200, 10, f"Total Paid: ₹{total_paid:.2f}", ln=True)
-                pdf.cell(200, 10, f"Remaining Due: ₹{remaining:.2f}", ln=True)
-
-                pdf.ln(10)
-                pdf.set_font("Arial", 'B', 12)
-                pdf.cell(60, 10, "Payment Date", 1)
-                pdf.cell(60, 10, "Amount (₹)", 1)
-                pdf.ln()
-
-                pdf.set_font("Arial", '', 12)
                 for p in payments:
-                    pdf.cell(60, 10, p[1], 1)
-                    pdf.cell(60, 10, f"₹{p[0]:.2f}", 1)
-                    pdf.ln()
+                    pdf.cell(200, 10, txt=f"Rs.{p[2]:,.2f} on {p[3]}", ln=True)
+            else:
+                pdf.cell(200, 10, txt="No payments yet.", ln=True)
 
-                return pdf.output(dest='S').encode('latin1', 'replace')
+            return pdf.output(dest='S').encode('latin1', 'replace')
 
-            if payments:
-                pdf_bytes = generate_pdf()
-                st.download_button(
-                    label=f"📄 Download PDF for {project_name}",
-                    data=pdf_bytes,
-                    file_name=f"{project_name}_receipt.pdf",
-                    mime="application/pdf"
-                )
+        pdf_bytes = generate_pdf()
+        st.download_button(
+            label="📄 Download PDF",
+            data=pdf_bytes,
+            file_name=f"{name}_quotation.pdf",
+            mime="application/pdf"
+        )
 
-            # --- Delete Project ---
-            if st.button(f"❌ Delete Project: {project_name}"):
-                c.execute("DELETE FROM payments WHERE client_id = ?", (client_id,))
-                c.execute("DELETE FROM clients WHERE id = ?", (client_id,))
-                conn.commit()
-                st.success(f"Deleted project '{project_name}' and all related payments.")
-                st.experimental_rerun()
+        # Delete project
+        if st.button(f"❌ Delete Project: {name}", key=f"{proj_id}_del"):
+            c.execute("DELETE FROM payments WHERE project_id = ?", (proj_id,))
+            c.execute("DELETE FROM projects WHERE id = ?", (proj_id,))
+            conn.commit()
+            st.warning(f"❌ Project '{name}' deleted!")
 
-else:
-    st.info("No projects found. Add a project above.")
-
-# --- Backup DB ---
-st.header("🗂️ Backup Your Database")
-
-with open("payments.db", "rb") as f:
-    db_bytes = f.read()
-
-st.download_button(
-    label="⬇️ Download Full Database Backup",
-    data=db_bytes,
-    file_name="payments_backup.db",
-    mime="application/octet-stream"
-)
+# DB backup
+st.markdown("### 📦 Backup")
+with open('payments.db', 'rb') as f:
+    st.download_button("Download Database File", f, file_name="payments.db")
