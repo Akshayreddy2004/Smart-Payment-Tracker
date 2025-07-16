@@ -82,13 +82,17 @@ for project in projects:
             conn.commit()
             st.success(f"✅ Payment Rs.{payment_amount:,.2f} added for {name}!")
 
-        # ✅ PDF generation with Rs.
+        # ✅ Safe PDF generation: replaces ₹ with Rs.
         def generate_pdf():
             pdf = FPDF()
             pdf.add_page()
             pdf.set_font("Arial", size=12)
-            pdf.cell(200, 10, txt=f"Project: {name}", ln=True)
-            pdf.cell(200, 10, txt=f"Client: {client}", ln=True)
+
+            safe_name = name.replace("₹", "Rs.")
+            safe_client = client.replace("₹", "Rs.")
+
+            pdf.cell(200, 10, txt=f"Project: {safe_name}", ln=True)
+            pdf.cell(200, 10, txt=f"Client: {safe_client}", ln=True)
             pdf.cell(200, 10, txt=f"Quotation: Rs.{quotation:,.2f}", ln=True)
             pdf.cell(200, 10, txt=f"Total Paid: Rs.{total_paid:,.2f}", ln=True)
             pdf.cell(200, 10, txt=f"Remaining Due: Rs.{due:,.2f}", ln=True)
