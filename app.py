@@ -7,7 +7,7 @@ from fpdf import FPDF
 conn = sqlite3.connect('payments.db', check_same_thread=False)
 c = conn.cursor()
 
-# ✅ Always ensure tables + column exist
+# ✅ Create tables safely
 c.execute('''
     CREATE TABLE IF NOT EXISTS projects (
         id INTEGER PRIMARY KEY,
@@ -16,7 +16,8 @@ c.execute('''
         quotation REAL
     )
 ''')
-# Add created_at if missing
+
+# ✅ Add created_at column if missing
 try:
     c.execute("ALTER TABLE projects ADD COLUMN created_at TEXT")
 except:
@@ -36,7 +37,7 @@ conn.commit()
 # ✅ App title
 st.title("📑 Smart Payment Tracker")
 
-# ✅ Add project
+# ✅ Add new project form
 with st.form("new_project"):
     name = st.text_input("Project Name")
     client = st.text_input("Client Name")
@@ -63,7 +64,7 @@ else:
     for project in projects:
         if has_created_at:
             if len(project) != 5:
-                continue  # skip bad rows
+                continue  # skip broken rows
             proj_id, name, client, quotation, created_at = project
         else:
             if len(project) != 4:
@@ -74,6 +75,7 @@ else:
         if proj_id is None:
             continue
 
+        # ✅ Payments total
         c.execute("SELECT SUM(amount) FROM payments WHERE project_id = ?", (proj_id,))
         total_paid = c.fetchone()[0] or 0
         due = quotation - total_paid
@@ -93,7 +95,12 @@ else:
             else:
                 st.info("No payments yet.")
 
-            payment_amount = st.number_input(f"Add Payment for {name}", min_value=0.0, key=f"{proj_id}_pay")
+            # ✅ Add payment
+            payment_amount = st.number_input(
+                f"Add Payment for {name}",
+                min_value=0.0,
+                key=f"{proj_id}_pay_input"
+            )
             if st.button(f"Add Payment for {name}", key=f"{proj_id}_pay_btn"):
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 c.execute("INSERT INTO payments (project_id, amount, paid_at) VALUES (?, ?, ?)",
@@ -101,6 +108,7 @@ else:
                 conn.commit()
                 st.success(f"✅ Payment Rs.{payment_amount:,.2f} added for {name}!")
 
+            # ✅ PDF generation
             def generate_pdf():
                 pdf = FPDF()
                 pdf.add_page()
@@ -127,16 +135,18 @@ else:
                 label="📄 Download PDF",
                 data=pdf_bytes,
                 file_name=f"{name}_quotation.pdf",
-                mime="application/pdf"
+                mime="application/pdf",
+                key=f"{proj_id}_pdf"  # ✅ unique key
             )
 
+            # ✅ Delete project
             if st.button(f"❌ Delete Project: {name}", key=f"{proj_id}_del"):
                 c.execute("DELETE FROM payments WHERE project_id = ?", (proj_id,))
                 c.execute("DELETE FROM projects WHERE id = ?", (proj_id,))
                 conn.commit()
                 st.warning(f"❌ Project '{name}' deleted!")
 
-# ✅ DB Backup
-st.markdown("### 📦 Backup")
+# ✅ Backup
+st.markdown("### 📦 Backup DB")
 with open('payments.db', 'rb') as f:
     st.download_button("Download Database File", f, file_name="payments.db")
