@@ -3,20 +3,24 @@ import sqlite3
 from datetime import datetime
 from fpdf import FPDF
 
-# ✅ Initialize DB connection
+# ✅ Connect DB
 conn = sqlite3.connect('payments.db', check_same_thread=False)
 c = conn.cursor()
 
-# ✅ Create tables if not exist
+# ✅ Always ensure tables + column exist
 c.execute('''
     CREATE TABLE IF NOT EXISTS projects (
         id INTEGER PRIMARY KEY,
         name TEXT,
         client TEXT,
-        quotation REAL,
-        created_at TEXT
+        quotation REAL
     )
 ''')
+# Add created_at if missing
+try:
+    c.execute("ALTER TABLE projects ADD COLUMN created_at TEXT")
+except:
+    pass
 
 c.execute('''
     CREATE TABLE IF NOT EXISTS payments (
@@ -29,10 +33,10 @@ c.execute('''
 
 conn.commit()
 
-# ✅ Title
+# ✅ App title
 st.title("📑 Smart Payment Tracker")
 
-# ✅ Add new project
+# ✅ Add project
 with st.form("new_project"):
     name = st.text_input("Project Name")
     client = st.text_input("Client Name")
@@ -46,6 +50,10 @@ with st.form("new_project"):
         st.success(f"✅ Project '{name}' added!")
 
 # ✅ Fetch projects
+c.execute("PRAGMA table_info(projects)")
+columns = [col[1] for col in c.fetchall()]
+has_created_at = 'created_at' in columns
+
 c.execute("SELECT * FROM projects")
 projects = c.fetchall()
 
@@ -53,18 +61,19 @@ if not projects:
     st.info("No projects found. Add one above!")
 else:
     for project in projects:
-        proj_id, name, client, quotation, created_at = project
+        if has_created_at:
+            if len(project) != 5:
+                continue  # skip bad rows
+            proj_id, name, client, quotation, created_at = project
+        else:
+            if len(project) != 4:
+                continue
+            proj_id, name, client, quotation = project
+            created_at = "N/A"
 
         if proj_id is None:
             continue
 
-        # ✅ Verify payments table exists
-        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='payments';")
-        if not c.fetchone():
-            st.warning("Payments table does not exist!")
-            continue
-
-        # ✅ Get total paid safely
         c.execute("SELECT SUM(amount) FROM payments WHERE project_id = ?", (proj_id,))
         total_paid = c.fetchone()[0] or 0
         due = quotation - total_paid
@@ -75,7 +84,6 @@ else:
             st.write(f"**Paid:** Rs.{total_paid:,.2f}")
             st.write(f"**Remaining Due:** Rs.{due:,.2f}")
 
-            # ✅ List payments
             c.execute("SELECT * FROM payments WHERE project_id = ?", (proj_id,))
             payments = c.fetchall()
             if payments:
@@ -85,7 +93,6 @@ else:
             else:
                 st.info("No payments yet.")
 
-            # ✅ Add payment
             payment_amount = st.number_input(f"Add Payment for {name}", min_value=0.0, key=f"{proj_id}_pay")
             if st.button(f"Add Payment for {name}", key=f"{proj_id}_pay_btn"):
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -94,17 +101,13 @@ else:
                 conn.commit()
                 st.success(f"✅ Payment Rs.{payment_amount:,.2f} added for {name}!")
 
-            # ✅ Safe PDF generation: replaces ₹ with Rs.
             def generate_pdf():
                 pdf = FPDF()
                 pdf.add_page()
                 pdf.set_font("Arial", size=12)
 
-                safe_name = name.replace("₹", "Rs.")
-                safe_client = client.replace("₹", "Rs.")
-
-                pdf.cell(200, 10, txt=f"Project: {safe_name}", ln=True)
-                pdf.cell(200, 10, txt=f"Client: {safe_client}", ln=True)
+                pdf.cell(200, 10, txt=f"Project: {name}", ln=True)
+                pdf.cell(200, 10, txt=f"Client: {client}", ln=True)
                 pdf.cell(200, 10, txt=f"Quotation: Rs.{quotation:,.2f}", ln=True)
                 pdf.cell(200, 10, txt=f"Total Paid: Rs.{total_paid:,.2f}", ln=True)
                 pdf.cell(200, 10, txt=f"Remaining Due: Rs.{due:,.2f}", ln=True)
@@ -127,14 +130,13 @@ else:
                 mime="application/pdf"
             )
 
-            # ✅ Delete project
             if st.button(f"❌ Delete Project: {name}", key=f"{proj_id}_del"):
                 c.execute("DELETE FROM payments WHERE project_id = ?", (proj_id,))
                 c.execute("DELETE FROM projects WHERE id = ?", (proj_id,))
                 conn.commit()
                 st.warning(f"❌ Project '{name}' deleted!")
 
-# ✅ DB backup
+# ✅ DB Backup
 st.markdown("### 📦 Backup")
 with open('payments.db', 'rb') as f:
     st.download_button("Download Database File", f, file_name="payments.db")
