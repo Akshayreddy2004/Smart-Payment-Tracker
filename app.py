@@ -3,11 +3,11 @@ import sqlite3
 from datetime import datetime
 from fpdf import FPDF
 
-# ✅ Initialize DB connection
+# ✅ Connect to SQLite database
 conn = sqlite3.connect('payments.db', check_same_thread=False)
 c = conn.cursor()
 
-# ✅ Create tables if not exist
+# ✅ Create tables if they don't exist
 c.execute('''
     CREATE TABLE IF NOT EXISTS projects (
         id INTEGER PRIMARY KEY,
@@ -29,7 +29,7 @@ c.execute('''
 
 conn.commit()
 
-# ✅ Title
+# ✅ App title
 st.title("📑 Smart Payment Tracker")
 
 # ✅ Add new project
@@ -55,7 +55,6 @@ else:
     for project in projects:
         proj_id, name, client, quotation, created_at = project
 
-        # ✅ Get total paid
         c.execute("SELECT SUM(amount) FROM payments WHERE project_id = ?", (proj_id,))
         total_paid = c.fetchone()[0] or 0
         due = quotation - total_paid
@@ -66,7 +65,6 @@ else:
             st.write(f"**Paid:** Rs.{total_paid:,.2f}")
             st.write(f"**Remaining Due:** Rs.{due:,.2f}")
 
-            # ✅ List payments
             c.execute("SELECT * FROM payments WHERE project_id = ?", (proj_id,))
             payments = c.fetchall()
             if payments:
@@ -85,54 +83,57 @@ else:
                 conn.commit()
                 st.success(f"✅ Payment Rs.{payment_amount:,.2f} added for {name}!")
 
-            # ✅ PDF generator with centered logo
+            # ✅ Generate PDF with centered logo & table
             def generate_pdf():
                 pdf = FPDF()
                 pdf.add_page()
+                pdf.set_auto_page_break(auto=True, margin=15)
                 pdf.set_font("Arial", size=12)
 
-                # ✅ Centered logo as letterhead
                 try:
-                    logo_width = 50  # adjust for your logo size
+                    # ✅ Centered logo like letterhead
+                    logo_width = 50
                     page_width = pdf.w - 2 * pdf.l_margin
-                    x_center = (page_width - logo_width) / 2
-                    pdf.image("logo.jpg", x=x_center, y=10, w=logo_width)
-                except:
-                    pass  # no logo, skip
+                    x_center = (pdf.w - logo_width) / 2
+                    pdf.image("logo.jpg", x=x_center, y=15, w=logo_width)
+                except Exception as e:
+                    print("Logo error:", e)
 
-                pdf.ln(40)  # space below logo
+                # Space below logo
+                pdf.ln(60)
 
-                pdf.set_font("Arial", "B", 14)
-                pdf.cell(0, 10, f"Project Quotation Summary", ln=True, align='C')
+                pdf.set_font("Arial", "B", 16)
+                pdf.cell(0, 10, "Project Quotation Summary", ln=True, align='C')
                 pdf.ln(5)
 
                 pdf.set_font("Arial", "", 12)
-
-                def add_row(label, value):
-                    pdf.cell(50, 10, label, 1)
-                    pdf.cell(0, 10, str(value), 1, ln=True)
-
-                add_row("Project Name:", name)
-                add_row("Client Name:", client)
-                add_row("Quotation:", f"Rs.{quotation:,.2f}")
-                add_row("Total Paid:", f"Rs.{total_paid:,.2f}")
-                add_row("Remaining Due:", f"Rs.{due:,.2f}")
-                add_row("Created:", created_at)
+                pdf.cell(50, 8, "Project Name:", 0)
+                pdf.cell(0, 8, name, 0, ln=True)
+                pdf.cell(50, 8, "Client Name:", 0)
+                pdf.cell(0, 8, client, 0, ln=True)
+                pdf.cell(50, 8, "Quotation:", 0)
+                pdf.cell(0, 8, f"Rs.{quotation:,.2f}", 0, ln=True)
+                pdf.cell(50, 8, "Total Paid:", 0)
+                pdf.cell(0, 8, f"Rs.{total_paid:,.2f}", 0, ln=True)
+                pdf.cell(50, 8, "Remaining Due:", 0)
+                pdf.cell(0, 8, f"Rs.{due:,.2f}", 0, ln=True)
+                pdf.cell(50, 8, "Created:", 0)
+                pdf.cell(0, 8, created_at, 0, ln=True)
 
                 pdf.ln(10)
-
                 pdf.set_font("Arial", "B", 12)
                 pdf.cell(0, 10, "Payments", ln=True)
                 pdf.set_font("Arial", "", 12)
 
                 if payments:
-                    pdf.cell(50, 10, "Amount", 1)
-                    pdf.cell(0, 10, "Date", 1, ln=True)
+                    pdf.set_fill_color(200, 200, 200)
+                    pdf.cell(50, 8, "Amount", 1, 0, 'C', 1)
+                    pdf.cell(70, 8, "Date", 1, 1, 'C', 1)
                     for p in payments:
-                        pdf.cell(50, 10, f"Rs.{p[2]:,.2f}", 1)
-                        pdf.cell(0, 10, p[3], 1, ln=True)
+                        pdf.cell(50, 8, f"Rs.{p[2]:,.2f}", 1)
+                        pdf.cell(70, 8, p[3], 1, ln=True)
                 else:
-                    pdf.cell(0, 10, "No payments yet.", 1, ln=True)
+                    pdf.cell(0, 8, "No payments yet.", 1, ln=True)
 
                 return pdf.output(dest='S').encode('latin1', 'replace')
 
@@ -152,7 +153,7 @@ else:
                 conn.commit()
                 st.warning(f"❌ Project '{name}' deleted!")
 
-# ✅ DB backup
+# ✅ DB backup download
 st.markdown("### 📦 Backup")
 with open('payments.db', 'rb') as f:
     st.download_button("Download Database File", f, file_name="payments.db")
