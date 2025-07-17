@@ -3,11 +3,11 @@ import sqlite3
 from datetime import datetime
 from fpdf import FPDF
 
-# ✅ Connect to SQLite database
+# ✅ Connect to SQLite DB
 conn = sqlite3.connect('payments.db', check_same_thread=False)
 c = conn.cursor()
 
-# ✅ Create tables if they don't exist
+# ✅ Create tables if needed
 c.execute('''
     CREATE TABLE IF NOT EXISTS projects (
         id INTEGER PRIMARY KEY,
@@ -26,7 +26,6 @@ c.execute('''
         paid_at TEXT
     )
 ''')
-
 conn.commit()
 
 # ✅ App title
@@ -40,12 +39,14 @@ with st.form("new_project"):
     submitted = st.form_submit_button("Add Project")
     if submitted:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        c.execute("INSERT INTO projects (name, client, quotation, created_at) VALUES (?, ?, ?, ?)",
-                  (name, client, quotation, now))
+        c.execute(
+            "INSERT INTO projects (name, client, quotation, created_at) VALUES (?, ?, ?, ?)",
+            (name, client, quotation, now)
+        )
         conn.commit()
         st.success(f"✅ Project '{name}' added!")
 
-# ✅ Fetch projects
+# ✅ Show all projects
 c.execute("SELECT * FROM projects")
 projects = c.fetchall()
 
@@ -65,6 +66,7 @@ else:
             st.write(f"**Paid:** Rs.{total_paid:,.2f}")
             st.write(f"**Remaining Due:** Rs.{due:,.2f}")
 
+            # ✅ Show payments
             c.execute("SELECT * FROM payments WHERE project_id = ?", (proj_id,))
             payments = c.fetchall()
             if payments:
@@ -75,65 +77,75 @@ else:
                 st.info("No payments yet.")
 
             # ✅ Add payment
-            payment_amount = st.number_input(f"Add Payment for {name}", min_value=0.0, key=f"{proj_id}_pay")
+            payment_amount = st.number_input(
+                f"Add Payment for {name}", min_value=0.0, key=f"{proj_id}_pay"
+            )
             if st.button(f"Add Payment for {name}", key=f"{proj_id}_pay_btn"):
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                c.execute("INSERT INTO payments (project_id, amount, paid_at) VALUES (?, ?, ?)",
-                          (proj_id, payment_amount, now))
+                c.execute(
+                    "INSERT INTO payments (project_id, amount, paid_at) VALUES (?, ?, ?)",
+                    (proj_id, payment_amount, now)
+                )
                 conn.commit()
                 st.success(f"✅ Payment Rs.{payment_amount:,.2f} added for {name}!")
 
-            # ✅ Generate PDF with centered logo & table
+            # ✅ Generate clean letterhead PDF
             def generate_pdf():
-                pdf = FPDF()
+                pdf = FPDF(format='A4')
+                pdf.set_auto_page_break(auto=True, margin=20)
                 pdf.add_page()
-                pdf.set_auto_page_break(auto=True, margin=15)
-                pdf.set_font("Arial", size=12)
+                pdf.set_left_margin(20)
+                pdf.set_right_margin(20)
 
+                # Add logo centered
                 try:
-                    # ✅ Centered logo like letterhead
-                    logo_width = 50
-                    page_width = pdf.w - 2 * pdf.l_margin
+                    logo_width = 40
                     x_center = (pdf.w - logo_width) / 2
                     pdf.image("logo.jpg", x=x_center, y=15, w=logo_width)
                 except Exception as e:
                     print("Logo error:", e)
 
-                # Space below logo
-                pdf.ln(60)
+                pdf.ln(50)
 
                 pdf.set_font("Arial", "B", 16)
-                pdf.cell(0, 10, "Project Quotation Summary", ln=True, align='C')
-                pdf.ln(5)
+                pdf.cell(0, 10, "Project Payment Summary", ln=True, align='C')
+                pdf.ln(10)
 
+                # Info table
                 pdf.set_font("Arial", "", 12)
-                pdf.cell(50, 8, "Project Name:", 0)
-                pdf.cell(0, 8, name, 0, ln=True)
-                pdf.cell(50, 8, "Client Name:", 0)
-                pdf.cell(0, 8, client, 0, ln=True)
-                pdf.cell(50, 8, "Quotation:", 0)
-                pdf.cell(0, 8, f"Rs.{quotation:,.2f}", 0, ln=True)
-                pdf.cell(50, 8, "Total Paid:", 0)
-                pdf.cell(0, 8, f"Rs.{total_paid:,.2f}", 0, ln=True)
-                pdf.cell(50, 8, "Remaining Due:", 0)
-                pdf.cell(0, 8, f"Rs.{due:,.2f}", 0, ln=True)
-                pdf.cell(50, 8, "Created:", 0)
-                pdf.cell(0, 8, created_at, 0, ln=True)
+                page_width = pdf.w - 2 * pdf.l_margin
+                col_width = page_width / 2
+
+                info = [
+                    ("Project Name", name),
+                    ("Client Name", client),
+                    ("Quotation", f"Rs.{quotation:,.2f}"),
+                    ("Total Paid", f"Rs.{total_paid:,.2f}"),
+                    ("Remaining Due", f"Rs.{due:,.2f}"),
+                    ("Created", created_at)
+                ]
+
+                for label, value in info:
+                    pdf.set_fill_color(240, 240, 240)
+                    pdf.cell(col_width * 0.4, 10, label, border=1, fill=True)
+                    pdf.cell(col_width * 0.6, 10, value, border=1, ln=True)
 
                 pdf.ln(10)
+
+                # Payments table
                 pdf.set_font("Arial", "B", 12)
-                pdf.cell(0, 10, "Payments", ln=True)
+                pdf.cell(0, 10, "Payments Made", ln=True)
                 pdf.set_font("Arial", "", 12)
 
                 if payments:
                     pdf.set_fill_color(200, 200, 200)
-                    pdf.cell(50, 8, "Amount", 1, 0, 'C', 1)
-                    pdf.cell(70, 8, "Date", 1, 1, 'C', 1)
+                    pdf.cell(50, 10, "Amount", 1, 0, 'C', 1)
+                    pdf.cell(80, 10, "Date", 1, 1, 'C', 1)
                     for p in payments:
-                        pdf.cell(50, 8, f"Rs.{p[2]:,.2f}", 1)
-                        pdf.cell(70, 8, p[3], 1, ln=True)
+                        pdf.cell(50, 10, f"Rs.{p[2]:,.2f}", 1)
+                        pdf.cell(80, 10, p[3], 1, 1)
                 else:
-                    pdf.cell(0, 8, "No payments yet.", 1, ln=True)
+                    pdf.cell(0, 10, "No payments made yet.", 0, 1)
 
                 return pdf.output(dest='S').encode('latin1', 'replace')
 
@@ -153,7 +165,7 @@ else:
                 conn.commit()
                 st.warning(f"❌ Project '{name}' deleted!")
 
-# ✅ DB backup download
+# ✅ DB backup
 st.markdown("### 📦 Backup")
 with open('payments.db', 'rb') as f:
     st.download_button("Download Database File", f, file_name="payments.db")
